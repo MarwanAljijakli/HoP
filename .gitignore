@@ -1,0 +1,35 @@
+# Private keys / secrets
+*.key
+*.pem
+*.crt
+*.pfx
+
+# Env files (keep .env.example tracked)
+.env
+.env.local
+*.env.local
+*.env.*.local
+
+# .NET build output
+**/bin/
+**/obj/
+
+# Test & dev artifacts
+**/TestResults/
+*.user
+.vs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Runtime logs (may contain captured attacker credentials)
+**/logs/
+*.jsonl

@@ -1,0 +1,10 @@
+# Cognitive engine
+flask>=3.0
+openai>=2.0
+python-dotenv>=1.0
+
+# HTTP client (used by the SSH honeypot in Phase 2 to call the cognitive engine)
+requests>=2.31
+
+# SSH honeypot (Phase 2)
+paramiko>=3.0
