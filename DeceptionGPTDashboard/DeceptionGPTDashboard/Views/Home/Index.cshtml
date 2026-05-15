@@ -1,4 +1,4 @@
-﻿@model DeceptionGPTDashboard.Models.DashboardVm
+@model DeceptionGPTDashboard.Models.DashboardVm
 
 @{
     var total = Model?.ActiveSessions?.Count ?? 0;
@@ -23,6 +23,16 @@
             font-size: 36px;
         }
 
+        h2 {
+            font-size: 22px;
+            margin-top: 30px;
+        }
+
+        .meta {
+            font-size: 14px;
+            opacity: 0.7;
+        }
+
         .stats {
             display: flex;
             gap: 20px;
@@ -38,11 +48,13 @@
         table {
             width: 100%;
             border-collapse: collapse;
+            margin-bottom: 25px;
         }
 
         th, td {
             border: 1px solid #00ff9a;
             padding: 10px;
+            vertical-align: top;
         }
 
         th {
@@ -52,39 +64,49 @@
         .row-active {
             background: rgba(0,255,154,0.05);
         }
+
+        td.cmd, td.resp {
+            max-width: 360px;
+            word-break: break-all;
+            white-space: pre-wrap;
+        }
     </style>
 </head>
 
 <body>
 
-<h1>DeceptionGPT Dashboard</h1>
+<h1>DeceptionGPT Dashboard <span class="meta">- last updated: <span id="last-updated">never</span></span></h1>
 
 <div class="stats">
     <div class="card">
         <div>Total Sessions</div>
-        <div>@total</div>
+        <div id="stat-total">@total</div>
     </div>
 
     <div class="card">
         <div>Active Sessions</div>
-        <div>@activeCount</div>
+        <div id="stat-active">@activeCount</div>
     </div>
 
     <div class="card">
         <div>Closed Sessions</div>
-        <div>@closedCount</div>
+        <div id="stat-closed">@closedCount</div>
     </div>
 </div>
 
+<h2>Sessions</h2>
 <table>
-    <tr>
-        <th>Session</th>
-        <th>IP</th>
-        <th>Protocol</th>
-        <th>Commands</th>
-        <th>Status</th>
-    </tr>
-@foreach (var s in Model.ActiveSessions)
+    <thead>
+        <tr>
+            <th>Session</th>
+            <th>IP</th>
+            <th>Protocol</th>
+            <th>Commands</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody id="sessions-tbody">
+@foreach (var s in Model?.ActiveSessions ?? Enumerable.Empty<SessionVm>())
 {
     var isActive = (s.Status ?? "").ToUpper() == "ACTIVE";
     <tr class="@(isActive ? "row-active" : "")">
@@ -95,9 +117,125 @@
         <td>@s.Status</td>
     </tr>
 }
-
-
+    </tbody>
 </table>
+
+<h2>Live activity (latest 50 commands)</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Time (UTC)</th>
+            <th>Session</th>
+            <th>IP</th>
+            <th>Command</th>
+            <th>AI Response</th>
+        </tr>
+    </thead>
+    <tbody id="events-tbody"></tbody>
+</table>
+
+<script>
+async function fetchEvents() {
+    try {
+        const r = await fetch('/api/events', { cache: 'no-store' });
+        if (!r.ok) return [];
+        const data = await r.json();
+        return Array.isArray(data) ? data : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function makeCell(text, fullTitle, cls) {
+    const td = document.createElement('td');
+    td.textContent = text == null ? '' : String(text);
+    if (fullTitle != null) td.title = String(fullTitle);
+    if (cls) td.className = cls;
+    return td;
+}
+
+function render(events) {
+    // Live activity table — newest first, capped at 50 rows
+    const eventsTbody = document.getElementById('events-tbody');
+    if (eventsTbody) {
+        eventsTbody.replaceChildren();
+        const top = events.slice(0, 50);
+        for (const e of top) {
+            const tr = document.createElement('tr');
+            tr.className = 'row-active';
+
+            let timeStr = '';
+            if (e.timestamp) {
+                const d = new Date(e.timestamp);
+                if (!isNaN(d.getTime())) {
+                    timeStr = d.toISOString().substring(11, 19);
+                }
+            }
+            tr.appendChild(makeCell(timeStr, e.timestamp));
+
+            const sid = e.session_id == null ? '' : String(e.session_id);
+            tr.appendChild(makeCell(sid.length > 8 ? sid.substring(0, 8) : sid, sid));
+
+            tr.appendChild(makeCell(e.src_ip, e.src_ip));
+            tr.appendChild(makeCell(e.input, e.input, 'cmd'));
+
+            const resp = e.response == null ? '' : String(e.response);
+            const truncated = resp.length > 200 ? resp.substring(0, 200) + '...' : resp;
+            tr.appendChild(makeCell(truncated, resp, 'resp'));
+
+            eventsTbody.appendChild(tr);
+        }
+    }
+
+    // Derive sessions: group by session_id, count, take first non-empty src_ip
+    const sessions = new Map();
+    for (const e of events) {
+        const sid = e.session_id == null ? 'unknown' : String(e.session_id);
+        if (!sessions.has(sid)) {
+            sessions.set(sid, { sid: sid, ip: '', count: 0 });
+        }
+        const s = sessions.get(sid);
+        s.count++;
+        if (!s.ip && e.src_ip) s.ip = String(e.src_ip);
+    }
+
+    const sessTbody = document.getElementById('sessions-tbody');
+    if (sessTbody) {
+        sessTbody.replaceChildren();
+        for (const s of sessions.values()) {
+            const tr = document.createElement('tr');
+            tr.className = 'row-active';
+            tr.appendChild(makeCell(s.sid));
+            tr.appendChild(makeCell(s.ip || '0.0.0.0'));
+            tr.appendChild(makeCell('SSH'));
+            tr.appendChild(makeCell(s.count));
+            tr.appendChild(makeCell('ACTIVE'));
+            sessTbody.appendChild(tr);
+        }
+    }
+
+    const total = sessions.size;
+    const statTotal = document.getElementById('stat-total');
+    const statActive = document.getElementById('stat-active');
+    const statClosed = document.getElementById('stat-closed');
+    if (statTotal) statTotal.textContent = String(total);
+    if (statActive) statActive.textContent = String(total);
+    if (statClosed) statClosed.textContent = '0';
+
+    const lu = document.getElementById('last-updated');
+    if (lu) lu.textContent = new Date().toLocaleTimeString();
+}
+
+setInterval(async () => {
+    if (!document.hidden) {
+        render(await fetchEvents());
+    }
+}, 3000);
+
+(async () => {
+    render(await fetchEvents());
+})();
+</script>
 
 </body>
 </html>
